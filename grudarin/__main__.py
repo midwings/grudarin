@@ -10,6 +10,7 @@ Workflow:
 """
 
 import argparse
+import difflib
 import os
 import sys
 import signal
@@ -179,6 +180,41 @@ def _get_interfaces():
         return []
 
 
+def _normalize_interface_guess(value):
+    """Normalize common interface typos such as wlano -> wlan0."""
+    raw = (value or "").strip()
+    if not raw:
+        return raw
+    if raw.lower().endswith("o"):
+        return raw[:-1] + "0"
+    return raw
+
+
+def _suggest_interface(user_value, interfaces=None):
+    """Suggest the closest known interface for a mistyped name."""
+    raw = (user_value or "").strip()
+    if not raw:
+        return None
+    interfaces = interfaces or _get_interfaces()
+    if not interfaces:
+        return None
+
+    lowered = {iface.lower(): iface for iface in interfaces}
+    normalized = _normalize_interface_guess(raw).lower()
+    if normalized in lowered:
+        return lowered[normalized]
+
+    matches = difflib.get_close_matches(
+        raw.lower(),
+        list(lowered.keys()),
+        n=1,
+        cutoff=0.55,
+    )
+    if matches:
+        return lowered[matches[0]]
+    return None
+
+
 def _resolve_scan_interface(user_value):
     """
     Resolve user-provided scan target to an interface.
@@ -192,6 +228,10 @@ def _resolve_scan_interface(user_value):
     iface_map = {i.lower(): i for i in interfaces}
     if raw.lower() in iface_map:
         return iface_map[raw.lower()]
+
+    normalized_guess = _normalize_interface_guess(raw)
+    if normalized_guess.lower() in iface_map:
+        return iface_map[normalized_guess.lower()]
 
     # Linux convenience: allow passing SSID (e.g., hotspot name) instead of iface.
     if sys.platform == "linux":
@@ -252,6 +292,15 @@ def _resolve_scan_interface(user_value):
 def _validate_interface_exists(iface):
     """True if interface currently exists from Scapy's perspective."""
     return iface in _get_interfaces()
+
+
+def _print_subprocess_output(prefix, result):
+    """Print captured subprocess output with a consistent prefix."""
+    for stream in (getattr(result, "stdout", "") or "", getattr(result, "stderr", "") or ""):
+        for line in str(stream).splitlines():
+            line = line.rstrip()
+            if line:
+                print(f"  {prefix} {line}")
 
 
 def parse_args():
@@ -947,7 +996,8 @@ def _fmt_bytes(n):
 def _run_update(args):
     """Update Grudarin using best available method."""
     print_banner()
-    print("  [update] Checking installation type...")
+    print("  [update] Preparing upgrade plan...")
+    print(f"  [update] Current version: {__version__}")
 
     # Method 1: local repo updater script
     base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -956,7 +1006,13 @@ def _run_update(args):
         print("  [update] Found local repository update script.")
         print(f"  [update] Running: {update_script}")
         try:
-            result = subprocess.run(["bash", update_script], check=False)
+            result = subprocess.run(
+                ["bash", update_script],
+                check=False,
+                text=True,
+                capture_output=True,
+            )
+            _print_subprocess_output("[update]", result)
             if result.returncode == 0:
                 print("  [ok] Update completed using local update.sh")
                 return
@@ -970,7 +1026,8 @@ def _run_update(args):
         if chk.returncode == 0:
             print("  [update] Using pipx to upgrade Grudarin...")
             cmd = ["pipx", "upgrade", "--include-injected", "grudarin"]
-            res = subprocess.run(cmd, check=False)
+            res = subprocess.run(cmd, check=False, text=True, capture_output=True)
+            _print_subprocess_output("[pipx]", res)
             if res.returncode == 0:
                 print("  [ok] pipx upgrade complete.")
                 return
@@ -979,7 +1036,8 @@ def _run_update(args):
             reinstall = [
                 "pipx", "install", "--force", f"git+{args.update_repo}"
             ]
-            res2 = subprocess.run(reinstall, check=False)
+            res2 = subprocess.run(reinstall, check=False, text=True, capture_output=True)
+            _print_subprocess_output("[pipx]", res2)
             if res2.returncode == 0:
                 print("  [ok] pipx reinstall from GitHub complete.")
                 return
@@ -994,7 +1052,8 @@ def _run_update(args):
     ]
     for cmd in pip_cmds:
         try:
-            res = subprocess.run(cmd, check=False)
+            res = subprocess.run(cmd, check=False, text=True, capture_output=True)
+            _print_subprocess_output("[pip]", res)
             if res.returncode == 0:
                 print("  [ok] pip update complete.")
                 return
@@ -1027,8 +1086,14 @@ def main():
         requested_scan = args.scan
         resolved_iface = _resolve_scan_interface(requested_scan)
         if not resolved_iface:
+            suggested_iface = _suggest_interface(requested_scan)
             print(f"  [error] Interface not found: {requested_scan}")
+            if suggested_iface:
+                print(f"  [hint] Did you mean: {suggested_iface}")
             print("  [hint] Use a real interface name (e.g., wlan0/eth0/en0), not SSID.")
+            if args.name and not args.ssid:
+                print(f"  [hint] '--name {args.name}' sets the session name only.")
+                print(f"  [hint] For WiFi label use: --ssid {args.name}")
             print("  [hint] Run: sudo grudarin --list")
             sys.exit(1)
         if not _validate_interface_exists(resolved_iface):
@@ -1039,6 +1104,11 @@ def main():
             print(f"  [info] Resolved '{requested_scan}' to interface '{resolved_iface}'")
         if args.ssid:
             print("  [legal] For authorized monitoring and security testing only.")
+        elif args.name:
+            known_ssids = {str(net.get('ssid', '')) for net in discover_wifi_networks()}
+            if args.name in known_ssids:
+                print(f"  [hint] '{args.name}' looks like a WiFi name.")
+                print(f"  [hint] If intended, use: --ssid {args.name}")
 
         if not check_privileges():
             print("  [warn] Not root. Packet capture may fail.")
