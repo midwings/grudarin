@@ -229,6 +229,11 @@ class SiteScanner:
         (re.compile(r"apache", re.I), "Apache"),
         (re.compile(r"iis", re.I), "IIS"),
     ]
+    PACKAGE_PATTERNS = [
+        re.compile(r"/npm/(@?[\w\.-]+(?:/[\w\.-]+)?)@([\w\.-]+)/", re.I),
+        re.compile(r"unpkg\.com/(@?[\w\.-]+(?:/[\w\.-]+)?)(?:@([\w\.-]+))?", re.I),
+        re.compile(r"jsdelivr\.net/npm/(@?[\w\.-]+(?:/[\w\.-]+)?)(?:@([\w\.-]+))?", re.I),
+    ]
 
     def __init__(self, model, domain, stop_event):
         self.model = model
@@ -461,6 +466,9 @@ class SiteScanner:
             t_key = self.model.add_entity("TECHNOLOGY", t)
             self.model.add_connection(url_key, t_key, "technology")
 
+        # PACKAGE fingerprinting from script/link URLs and CDN imports.
+        self._extract_web_packages(text, url_key)
+
         # Security header and cookie hygiene checks.
         headers_lower = {k.lower(): v for k, v in headers.items()}
         missing_headers = []
@@ -572,6 +580,38 @@ class SiteScanner:
 
         for sev, desc in vuln_hits:
             self._record_vulnerability(url_key, desc, desc, sev)
+
+    def _extract_web_packages(self, html_text, url_key):
+        if not html_text:
+            return
+
+        package_hits = {}
+        refs = re.findall(r"""(?:src|href)=["']([^"']+)["']""", html_text, flags=re.I)
+        blob = "\n".join(refs + [html_text[:100000]])
+
+        for pat in self.PACKAGE_PATTERNS:
+            for m in pat.finditer(blob):
+                name = (m.group(1) or "").strip()
+                version = (m.group(2) or "").strip() if len(m.groups()) >= 2 else ""
+                if not name:
+                    continue
+                package_hits[name.lower()] = {"name": name, "version": version}
+
+        # Framework-specific fallback hints from static bundle names.
+        if re.search(r"(?:^|/)(react|react-dom)(?:\.min)?\.js", blob, flags=re.I):
+            package_hits.setdefault("react", {"name": "react", "version": ""})
+        if re.search(r"(?:^|/)(vue)(?:\.runtime)?(?:\.min)?\.js", blob, flags=re.I):
+            package_hits.setdefault("vue", {"name": "vue", "version": ""})
+        if re.search(r"(?:^|/)(angular)(?:\.min)?\.js", blob, flags=re.I):
+            package_hits.setdefault("angular", {"name": "angular", "version": ""})
+
+        for item in sorted(package_hits.values(), key=lambda v: v["name"]):
+            node_value = item["name"] + (f"@{item['version']}" if item["version"] else "")
+            attrs = {"package": item["name"]}
+            if item["version"]:
+                attrs["version"] = item["version"]
+            pkg_key = self.model.add_entity("PACKAGE", node_value, attrs)
+            self.model.add_connection(url_key, pkg_key, "uses_package")
 
     def _inspect_tls(self, host, url_key):
         if not host:
