@@ -269,6 +269,14 @@ GRAPH CONTROLS:
         "--privacy-mode", action="store_true",
         help="Mask sensitive IP details in output reports/exports"
     )
+    parser.add_argument(
+        "--update", action="store_true",
+        help="Update Grudarin to latest version (git repo or pipx install)"
+    )
+    parser.add_argument(
+        "--update-repo", type=str, default="https://github.com/Chintanpatel24/grudarin.git",
+        help="GitHub repo URL used for pipx update/install"
+    )
     return parser.parse_args(argv)
 
 
@@ -803,6 +811,69 @@ def _fmt_bytes(n):
     return f"{n/1073741824:.2f} GB"
 
 
+def _run_update(args):
+    """Update Grudarin using best available method."""
+    print_banner()
+    print("  [update] Checking installation type...")
+
+    # Method 1: local repo updater script
+    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    update_script = os.path.join(base, "update.sh")
+    if os.path.isfile(update_script):
+        print("  [update] Found local repository update script.")
+        print(f"  [update] Running: {update_script}")
+        try:
+            result = subprocess.run(["bash", update_script], check=False)
+            if result.returncode == 0:
+                print("  [ok] Update completed using local update.sh")
+                return
+            print("  [warn] Local update.sh failed, trying pipx fallback...")
+        except Exception as e:
+            print(f"  [warn] Local update script error: {e}")
+
+    # Method 2: pipx upgrade if available
+    try:
+        chk = subprocess.run(["pipx", "--version"], capture_output=True, text=True, timeout=8)
+        if chk.returncode == 0:
+            print("  [update] Using pipx to upgrade Grudarin...")
+            cmd = ["pipx", "upgrade", "--include-injected", "grudarin"]
+            res = subprocess.run(cmd, check=False)
+            if res.returncode == 0:
+                print("  [ok] pipx upgrade complete.")
+                return
+
+            print("  [update] pipx upgrade did not complete. Reinstalling from repo...")
+            reinstall = [
+                "pipx", "install", "--force", f"git+{args.update_repo}"
+            ]
+            res2 = subprocess.run(reinstall, check=False)
+            if res2.returncode == 0:
+                print("  [ok] pipx reinstall from GitHub complete.")
+                return
+    except Exception:
+        pass
+
+    # Method 3: pip user install fallback
+    print("  [update] Falling back to pip user install from GitHub...")
+    pip_cmds = [
+        [sys.executable, "-m", "pip", "install", "--upgrade", f"git+{args.update_repo}"],
+        [sys.executable, "-m", "pip", "install", "--user", "--upgrade", f"git+{args.update_repo}"],
+    ]
+    for cmd in pip_cmds:
+        try:
+            res = subprocess.run(cmd, check=False)
+            if res.returncode == 0:
+                print("  [ok] pip update complete.")
+                return
+        except Exception:
+            continue
+
+    print("  [error] Update failed with all available methods.")
+    print("  Try manually:")
+    print(f"    pipx install --force \"git+{args.update_repo}\"")
+    sys.exit(1)
+
+
 def main():
     """Main entry point."""
     args = parse_args()
@@ -812,6 +883,10 @@ def main():
         if not check_privileges():
             print("  [warn] Run with sudo for full interface/WiFi info")
         list_interfaces()
+        sys.exit(0)
+
+    if args.update:
+        _run_update(args)
         sys.exit(0)
 
     if args.scan:
