@@ -50,6 +50,7 @@ class DashboardWindow:
         self.proto_list = None
         self.device_list = None
         self.activity_text = None
+        self.packet_list = None
 
     def _build(self):
         self.root = tk.Tk()
@@ -64,7 +65,10 @@ class DashboardWindow:
 
         title = tk.Label(
             header,
-            text=f"GRUDARIN LIVE MONITOR  |  IFACE: {self.interface_name}  |  SSID: {self.target_ssid}",
+            text=(
+                f"GRUDARIN LIVE ACTIVITY MONITOR  |  IFACE: {self.interface_name}"
+                f"  |  SSID: {self.target_ssid}"
+            ),
             bg=self.PANEL,
             fg=self.ACCENT,
             font=("Courier", 14, "bold"),
@@ -112,9 +116,32 @@ class DashboardWindow:
         right.pack(side="right", fill="y", padx=(6, 0))
         right.pack_propagate(False)
 
-        tk.Label(left, text="Top Devices", bg=self.PANEL, fg=self.TEXT, font=("Courier", 11, "bold")).pack(anchor="w", padx=10, pady=(10, 4))
+        tk.Label(
+            left,
+            text="Top Devices",
+            bg=self.PANEL,
+            fg=self.TEXT,
+            font=("Courier", 11, "bold"),
+        ).pack(anchor="w", padx=10, pady=(10, 4))
         self.device_list = tk.Listbox(left, bg="#0f1630", fg=self.TEXT, relief="flat", font=("Courier", 10))
         self.device_list.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        tk.Label(
+            left,
+            text="Recent Packets",
+            bg=self.PANEL,
+            fg=self.TEXT,
+            font=("Courier", 11, "bold"),
+        ).pack(anchor="w", padx=10, pady=(0, 4))
+        self.packet_list = tk.Listbox(
+            left,
+            bg="#0f1630",
+            fg=self.DIM,
+            relief="flat",
+            font=("Courier", 9),
+            height=14,
+        )
+        self.packet_list.pack(fill="x", padx=10, pady=(0, 10))
 
         tk.Label(right, text="Protocol Distribution", bg=self.PANEL, fg=self.TEXT, font=("Courier", 11, "bold")).pack(anchor="w", padx=10, pady=(10, 4))
         self.proto_list = tk.Listbox(right, bg="#0f1630", fg=self.TEXT, relief="flat", font=("Courier", 10), height=14)
@@ -162,6 +189,19 @@ class DashboardWindow:
             vendor = info.get("vendor", "") or "-"
             self.device_list.insert(tk.END, f"{label[:24]:<24}  {ip:<16}  {pkt:>6} pkts  {vendor[:12]}")
 
+        self.packet_list.delete(0, tk.END)
+        for pkt in self.model.get_recent_packets(limit=24):
+            ts = pkt.get("timestamp", "")[-8:]
+            proto = pkt.get("protocol", "-")
+            src = pkt.get("src_ip", "-")
+            dst = pkt.get("dst_ip", "-")
+            activity = pkt.get("activity", "")
+            if activity:
+                text = f"[{ts}] {proto:<7} {src} -> {activity}"
+            else:
+                text = f"[{ts}] {proto:<7} {src} -> {dst}"
+            self.packet_list.insert(tk.END, text[:140])
+
         self.activity_text.configure(state="normal")
         self.activity_text.delete("1.0", tk.END)
         for ev in stats.get("recent_activity", [])[-30:]:
@@ -169,7 +209,11 @@ class DashboardWindow:
             src = ev.get("source_ip", "-")
             target = ev.get("target", "-")
             et = ev.get("event_type", "-")
-            self.activity_text.insert(tk.END, f"[{t}] {src} -> {target} ({et})\n")
+            details = ev.get("details", "")
+            line = f"[{t}] {src} -> {target} ({et})"
+            if details:
+                line += f" | {details}"
+            self.activity_text.insert(tk.END, line[:220] + "\n")
         self.activity_text.configure(state="disabled")
 
         self.root.after(500, self._tick)
