@@ -123,6 +123,28 @@ class PacketCapture:
                     f"{record.src_ip}:{tcp.sport} -> "
                     f"{record.dst_ip}:{tcp.dport} [{record.flags}]"
                 )
+                if pkt.haslayer(Raw):
+                    try:
+                        payload = bytes(pkt[Raw].load[:2048]).decode("utf-8", errors="ignore")
+                        first_line = payload.splitlines()[0] if payload else ""
+                        if first_line.startswith(("GET ", "POST ", "PUT ", "DELETE ", "HEAD ", "OPTIONS ")):
+                            host = ""
+                            for ln in payload.splitlines()[:40]:
+                                if ln.lower().startswith("host:"):
+                                    host = ln.split(":", 1)[1].strip()
+                                    break
+                            if host:
+                                path = first_line.split(" ")[1] if " " in first_line else "/"
+                                activity = f"http://{host}{path}"
+                                record.activity = activity
+                                self.model.add_activity(
+                                    record.src_ip,
+                                    activity,
+                                    "http_request",
+                                    first_line[:120],
+                                )
+                    except Exception:
+                        pass
 
             # Layer 4 - UDP
             elif pkt.haslayer(UDP):
@@ -172,6 +194,25 @@ class PacketCapture:
                 )
 
             # DNS resolution extraction
+            if pkt.haslayer(DNS):
+                try:
+                    dns = pkt[DNS]
+                    if getattr(dns, "qd", None):
+                        qname = dns.qd.qname
+                        if isinstance(qname, bytes):
+                            qname = qname.decode("utf-8", errors="ignore")
+                        qname = str(qname).rstrip(".")
+                        if qname:
+                            record.activity = f"dns://{qname}"
+                            if int(getattr(dns, "qr", 0)) == 0:
+                                self.model.add_activity(
+                                    record.src_ip,
+                                    qname,
+                                    "dns_query",
+                                    f"dst={record.dst_ip}",
+                                )
+                except Exception:
+                    pass
             if pkt.haslayer(DNS) and pkt.haslayer(DNSRR):
                 try:
                     dns = pkt[DNS]
