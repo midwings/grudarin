@@ -32,9 +32,10 @@ echo ""
 echo -e "${CYAN}${BOLD}"
 echo "    ================================================================"
 echo "                          G R U D A R I N"
-echo "                        Updater v2.0.0"
+echo "                        Updater v1.1.8"
 echo "    ================================================================"
 echo -e "${NC}"
+echo -e "  ${CYAN}>> Installed version:${NC} 1.1.8"
 
 # ----------------------------------------------------------------
 # Step 1: Check git
@@ -90,6 +91,11 @@ else
     echo ""
     echo -e "  ${CYAN}>> Recent changes:${NC}"
     git log --oneline "$BEFORE..$AFTER" 2>/dev/null | head -10 | while IFS= read -r line; do
+        echo "          $line"
+    done
+    echo ""
+    echo -e "  ${CYAN}>> Files changed:${NC}"
+    git diff --name-only "$BEFORE" "$AFTER" 2>/dev/null | head -20 | while IFS= read -r line; do
         echo "          $line"
     done
 fi
@@ -178,6 +184,11 @@ echo -e "  ${GREEN}[ok]${NC}    Python dependencies updated"
 # ----------------------------------------------------------------
 # Done
 # ----------------------------------------------------------------
+echo ""
+echo -e "  ${CYAN}>> Upgrade summary${NC}"
+echo -e "  ${GREEN}[ok]${NC}    Core version: 1.1.8"
+echo -e "  ${GREEN}[ok]${NC}    CLI refreshed"
+echo -e "  ${GREEN}[ok]${NC}    Native helpers rebuilt when toolchains were available"
 echo ""
 echo -e "  ${GREEN}${BOLD}Update complete.${NC}"
 echo ""
