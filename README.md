@@ -158,3 +158,31 @@ cd netprobe && go build -o ../bin/grudarin_netprobe netprobe.go && cd ..
 >captures live network activity, discovers devices, scans for vulnerabilities and
 >misconfigurations, maps LAN structure when needed, and saves detailed reports in
 >Markdown with security findings highlighted in red bold text.
+
+## Quick launcher (local)
+
+A small launcher is provided in `bin/grudarin` to run the project without installing globally. To make `grudarin` available system-wide, one of these options is recommended:
+
+- Use the installer (recommended):
+
+```bash
+cd /path/to/grudarin
+sudo ./install.sh
+```
+
+- Symlink the provided launcher (manual):
+
+```bash
+cd /path/to/grudarin
+sudo ln -sf "$(pwd)/grudarin.sh" /usr/local/bin/grudarin
+# or use the lightweight launcher
+sudo ln -sf "$(pwd)/bin/grudarin" /usr/local/bin/grudarin
+sudo chmod +x /usr/local/bin/grudarin
+```
+
+- Editable/developer install (no system-wide changes):
+
+```bash
+cd /path/to/grudarin
+python3 -m pip install --user -e .
+```
