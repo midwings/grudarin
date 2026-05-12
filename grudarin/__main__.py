@@ -258,6 +258,15 @@ GRAPH CONTROLS:
         "--filter", "-f", type=str, default=None,
         help="BPF filter (e.g., 'tcp port 80')"
     )
+    parser.add_argument(
+        "--export-graph", type=str, default="none",
+        choices=["none", "json", "csv", "both"],
+        help="Export graph data as JSON/CSV files (default: none)"
+    )
+    parser.add_argument(
+        "--privacy-mode", action="store_true",
+        help="Mask sensitive IP details in output reports/exports"
+    )
     return parser.parse_args(argv)
 
 
@@ -552,13 +561,23 @@ def run_scan(iface, output_dir, scan_name, args):
 
     # Write reports
     print("  [report] Writing final reports...")
-    notes_writer.write_final_report(network_model, findings_data)
+    notes_writer.write_final_report(
+        network_model,
+        findings_data,
+        privacy_mode=args.privacy_mode,
+        export_graph=args.export_graph,
+    )
 
     print()
     print(f"  Reports saved to: {session_dir}")
     print(f"    session_report.md    Markdown report (security findings in red)")
     print(f"    session_data.json    Machine-readable full data")
     print(f"    packets.log          Raw packet log")
+    if args.export_graph in ("json", "both"):
+        print(f"    graph_export.json    Graph export (nodes/edges)")
+    if args.export_graph in ("csv", "both"):
+        print(f"    graph_nodes.csv      Graph nodes table")
+        print(f"    graph_edges.csv      Graph edges table")
     print()
 
     stats = network_model.get_stats()
@@ -711,13 +730,23 @@ def run_site_scan(domain, output_dir, scan_name, args):
     findings_data.sort(key=lambda item: severity_order.get(str(item.get("severity", "info")).lower(), 99))
 
     print("\n  [report] Writing final reports...")
-    notes_writer.write_final_report(model, findings_data)
+    notes_writer.write_final_report(
+        model,
+        findings_data,
+        privacy_mode=args.privacy_mode,
+        export_graph=args.export_graph,
+    )
 
     stats = model.get_stats()
     print(f"\n  Reports saved to: {session_dir}")
     print("    session_report.md")
     print("    session_data.json")
     print("    packets.log")
+    if args.export_graph in ("json", "both"):
+        print("    graph_export.json")
+    if args.export_graph in ("csv", "both"):
+        print("    graph_nodes.csv")
+        print("    graph_edges.csv")
     print("\n  Site Scan Summary:")
     print(f"    Entities Found : {stats['total_devices']}")
     print(f"    Relationships  : {stats['total_connections']}")
