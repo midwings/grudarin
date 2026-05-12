@@ -194,6 +194,7 @@ def _resolve_scan_interface(user_value):
 
     # Linux convenience: allow passing SSID (e.g., hotspot name) instead of iface.
     if sys.platform == "linux":
+        # Try active WiFi map first.
         try:
             out = subprocess.check_output(
                 ["nmcli", "-t", "-f", "DEVICE,ACTIVE,SSID", "dev", "wifi"],
@@ -215,7 +216,41 @@ def _resolve_scan_interface(user_value):
         except Exception:
             pass
 
+        # Fallback: if SSID exists in scan list, pick connected wifi device or first wifi device.
+        try:
+            nets = discover_wifi_networks()
+            if any(str(n.get("ssid", "")).lower() == raw.lower() for n in nets):
+                # Prefer connected wifi interface.
+                out = subprocess.check_output(
+                    ["nmcli", "-t", "-f", "DEVICE,TYPE,STATE", "dev", "status"],
+                    stderr=subprocess.DEVNULL,
+                    timeout=8,
+                ).decode("utf-8", errors="ignore")
+                wifi_devices = []
+                for line in out.splitlines():
+                    parts = line.split(":")
+                    if len(parts) < 3:
+                        continue
+                    dev = parts[0].strip()
+                    typ = parts[1].strip().lower()
+                    state = parts[2].strip().lower()
+                    if typ == "wifi" and dev:
+                        if dev in interfaces or dev.lower() in iface_map:
+                            mapped = dev if dev in interfaces else iface_map[dev.lower()]
+                            if state == "connected":
+                                return mapped
+                            wifi_devices.append(mapped)
+                if wifi_devices:
+                    return wifi_devices[0]
+        except Exception:
+            pass
+
     return None
+
+
+def _validate_interface_exists(iface):
+    """True if interface currently exists from Scapy's perspective."""
+    return iface in _get_interfaces()
 
 
 def parse_args():
@@ -946,6 +981,10 @@ def main():
             print(f"  [error] Interface not found: {requested_scan}")
             print("  [hint] Use a real interface name (e.g., wlan0/eth0/en0), not SSID.")
             print("  [hint] Run: sudo grudarin --list")
+            sys.exit(1)
+        if not _validate_interface_exists(resolved_iface):
+            print(f"  [error] Interface is not available right now: {resolved_iface}")
+            print("  [hint] Check adapter state and run: sudo grudarin --list")
             sys.exit(1)
         if resolved_iface != requested_scan:
             print(f"  [info] Resolved '{requested_scan}' to interface '{resolved_iface}'")
