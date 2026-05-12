@@ -71,10 +71,28 @@ chmod +x install.sh
 sudo ./install.sh
 ```
 
-### pip install (package mode)
+### pip install (after PyPI publish)
 
 ```bash
 pip install grudarin
+```
+
+If package is not published yet, install directly from GitHub:
+
+```bash
+pip install "git+https://github.com/Chintanpatel24/grudarin.git"
+```
+
+Or with pipx (recommended for CLI tools):
+
+```bash
+pipx install "git+https://github.com/Chintanpatel24/grudarin.git"
+```
+
+After publish to PyPI:
+
+```bash
+pipx install grudarin
 ```
 
 Then run:
