@@ -71,6 +71,20 @@ chmod +x install.sh
 sudo ./install.sh
 ```
 
+### pip install (package mode)
+
+```bash
+pip install grudarin
+```
+
+Then run:
+
+```bash
+sudo grudarin --list
+sudo grudarin --scan wlan0
+grudarin --scan-site example.com
+```
+
 ### Windows
 
 ```text
