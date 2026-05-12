@@ -261,28 +261,41 @@ def _resolve_scan_interface(user_value):
         try:
             nets = discover_wifi_networks()
             if any(str(n.get("ssid", "")).lower() == raw.lower() for n in nets):
-                # Prefer connected wifi interface.
-                out = subprocess.check_output(
-                    ["nmcli", "-t", "-f", "DEVICE,TYPE,STATE", "dev", "status"],
-                    stderr=subprocess.DEVNULL,
-                    timeout=8,
-                ).decode("utf-8", errors="ignore")
+                # Prefer connected wifi interface if nmcli is available.
                 wifi_devices = []
-                for line in out.splitlines():
-                    parts = line.split(":")
-                    if len(parts) < 3:
-                        continue
-                    dev = parts[0].strip()
-                    typ = parts[1].strip().lower()
-                    state = parts[2].strip().lower()
-                    if typ == "wifi" and dev:
-                        if dev in interfaces or dev.lower() in iface_map:
-                            mapped = dev if dev in interfaces else iface_map[dev.lower()]
-                            if state == "connected":
-                                return mapped
-                            wifi_devices.append(mapped)
+                try:
+                    out = subprocess.check_output(
+                        ["nmcli", "-t", "-f", "DEVICE,TYPE,STATE", "dev", "status"],
+                        stderr=subprocess.DEVNULL,
+                        timeout=8,
+                    ).decode("utf-8", errors="ignore")
+                    for line in out.splitlines():
+                        parts = line.split(":" )
+                        if len(parts) < 3:
+                            continue
+                        dev = parts[0].strip()
+                        typ = parts[1].strip().lower()
+                        state = parts[2].strip().lower()
+                        if typ == "wifi" and dev:
+                            if dev in interfaces or dev.lower() in iface_map:
+                                mapped = dev if dev in interfaces else iface_map[dev.lower()]
+                                if state == "connected":
+                                    return mapped
+                                wifi_devices.append(mapped)
+                except Exception:
+                    # nmcli may not be available in the sudo environment; continue to other fallbacks.
+                    wifi_devices = []
+
                 if wifi_devices:
                     return wifi_devices[0]
+
+                # As a last resort, pick the first interface that looks like a wireless adapter
+                # (common prefixes used by Linux: wlan, wl, wlp, wifi). This helps when nmcli
+                # or iwlist are unavailable under sudo but a wireless device exists.
+                for candidate in interfaces:
+                    low = candidate.lower()
+                    if low.startswith(("wlan", "wl", "wlp", "wifi")):
+                        return candidate
         except Exception:
             pass
 
@@ -568,6 +581,7 @@ def run_scan(iface, output_dir, scan_name, args):
     print(f"  C++ Scanner : {'Ready' if tools.get('cpp_scanner') else 'Python fallback'}")
     print(f"  Go Netprobe : {'Ready' if tools.get('go_netprobe') else 'Python fallback'}")
     print(f"  Lua Rules   : {'Ready' if tools.get('lua') else 'Python fallback'}")
+    print("  Notice      : Ethical and educational use only on authorized networks")
     print()
 
     # Shared state
