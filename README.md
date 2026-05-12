@@ -10,16 +10,17 @@
 ---
 
 # Grudarin
->- Grudarin is a network monitoring tool that captures and analyzes real-time traffic, showing active connections, IP addresses, ports, and protocols. It helps detect anomalies, monitor bandwidth usage, and identify devices on a network. The tool supports deep inspection with features like promiscuous mode for comprehensive analysis. While its real-time visibility is strong, it requires longer scans for accurate threat detection. 
+>- Grudarin is an open-source network activity monitor and LAN mapper for authorized security analysis and education. It captures real-time traffic metadata, highlights destinations such as DNS, HTTP hostnames, and TLS SNI names when available, and helps operators understand how devices communicate on a network without breaking HTTPS encryption.
 - real-time packet monitoring
+- live activity and destination feed
 - node-level vulnerability scanning
-- built-in graph dashboard (native GUI)
+- dashboard-first native GUI
 - markdown + JSON reporting
 
 ## Example output
 > [!important]
 > This tool is under active development.
-
+  
 <table>
   <tr>
     <td><img width="1322" height="767" alt="gru2" src="https://github.com/user-attachments/assets/575d7720-6c31-4b84-bce4-ff4a6fb94adb" /> </td>
@@ -30,8 +31,8 @@
 
 ## Key Capabilities
 
-- Real-time LAN topology graph with smooth force simulation
-- Native built-in graph view (no external graph framework)
+- Real-time activity dashboard for packets, destinations, devices, and protocols
+- Optional LAN topology graph for structural mapping
 - Flat orange/red nodes on a black dashboard
 - Live edge relation labels and per-node connection labels
 - Node inspector with:
@@ -134,7 +135,7 @@ cd netprobe && go build -o ../bin/grudarin_netprobe netprobe.go && cd ..
 ## Features
 
 - **Real-time packet capture** with protocol analysis (TCP, UDP, ICMP, ARP, DNS, DHCP, HTTP, HTTPS, SSH, FTP, SMB, RDP, SNMP, and more)
-- **Live force-directed graph** that updates as devices appear and communicate
+- **Live activity dashboard** with device, protocol, packet, and destination feeds
 - **Node labels** showing IP, MAC address, vendor, hostname, and open ports under each device
 - **Protocol labels** on graph edges showing what protocols flow between devices
 - **C++ port scanner** with 38 vulnerability signatures and 34 dangerous port definitions
@@ -152,8 +153,8 @@ cd netprobe && go build -o ../bin/grudarin_netprobe netprobe.go && cd ..
 - **Zero tracking, zero telemetry** - completely offline and private
 
 > [!NOTE]
->- **Network Monitor + Vulnerability Scanner + Force-Directed Graph**
->- **Grudarin** is an open-source cybersecurity tool that monitors networks in real time,
->discovers devices, scans for vulnerabilities and misconfigurations, visualizes the
-network topology as a live force-directed graph, and saves detailed reports in
-Markdown with security findings highlighted in red bold text.
+>- **Live Activity Monitor + Vulnerability Scanner + LAN Mapper**
+>- **Grudarin** is an open-source cybersecurity tool for authorized monitoring that
+>captures live network activity, discovers devices, scans for vulnerabilities and
+>misconfigurations, maps LAN structure when needed, and saves detailed reports in
+>Markdown with security findings highlighted in red bold text.
