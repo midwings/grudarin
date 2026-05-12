@@ -49,24 +49,26 @@ sudo grudarin
 # list interfaces and wifi
 sudo grudarin --list
 
-# live network scan (graph GUI)
+# live network activity monitor (dashboard GUI)
 sudo grudarin --scan wlan0
+
+# live network activity monitor with hotspot label
+sudo grudarin --scan wlan0 Pixel
 
 # headless network scan
 sudo grudarin --scan eth0 --no-graph -d 120
+
+# optional LAN structure graph
+sudo grudarin --scan wlan0 --view graph
 
 # site/domain scan (live graph entities)
 grudarin --scan-site example.invalid
 ```
 
-## Built-in Graph Controls
+## Live UI Controls
 
-- Left click node: select and inspect full details
-- Left drag node: move node
-- Left drag background: pan graph
-- Mouse wheel: zoom in/out
-- Scan Selected Node: targeted node scan
-- Scan All Visible Nodes: bulk node scan
+- Dashboard mode: watch device, protocol, activity, and packet feeds
+- Graph mode: inspect LAN structure and scan visible nodes
 - Ctrl+C or close window: stop scan
 
 ## Reports and Output
