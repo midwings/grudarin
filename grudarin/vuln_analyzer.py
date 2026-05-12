@@ -257,10 +257,11 @@ class VulnAnalyzer:
                 return json.loads(result.stdout)
             if result.returncode != 0:
                 err_out = (result.stderr or "").strip()
-                if err_out:
+                if err_out and os.environ.get("GRUDARIN_DEBUG") == "1":
                     print(f"  Lua rules stderr: {err_out[:400]}")
         except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception) as e:
-            print(f"  Lua rules error: {e}")
+            if os.environ.get("GRUDARIN_DEBUG") == "1":
+                print(f"  Lua rules error: {e}")
             try:
                 os.remove(wrapper_path)
             except Exception:
