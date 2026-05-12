@@ -6,7 +6,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="grudarin",
-    version="2.1.0",
+    version="1.1.8",
     description="Network Monitoring Tool with Force-Directed Graph and Vulnerability Scanner",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
