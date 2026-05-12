@@ -17,8 +17,10 @@ import subprocess
 import threading
 import time
 import ipaddress
+import tempfile
 from datetime import datetime
 
+from grudarin import __version__
 from grudarin.capture import PacketCapture
 from grudarin.network_model import NetworkModel
 from grudarin.notes import NotesWriter
@@ -276,9 +278,41 @@ def print_banner():
     ================================================================
                           G R U D A R I N
               Network Monitor + Vulnerability Scanner
-               + Built-in Graph Viewer  v2.0.0
+               + Built-in Graph Viewer  v%s
     ================================================================
-    """)
+    """ % __version__)
+
+
+def _resolve_output_base_dir(requested_dir=None):
+    """
+    Return a writable base output directory.
+    Falls back to user-home local data path, then temp directory.
+    """
+    candidates = []
+    if requested_dir:
+        candidates.append(os.path.abspath(os.path.expanduser(requested_dir)))
+    else:
+        candidates.append(os.path.join(os.getcwd(), "grudarin_output"))
+
+    home = os.path.expanduser("~")
+    candidates.append(os.path.join(home, ".local", "share", "grudarin_output"))
+    candidates.append(os.path.join(tempfile.gettempdir(), "grudarin_output"))
+
+    last_err = None
+    for base in candidates:
+        try:
+            os.makedirs(base, exist_ok=True)
+            test_file = os.path.join(base, ".grudarin_write_test")
+            with open(test_file, "w", encoding="utf-8") as f:
+                f.write("ok")
+            os.remove(test_file)
+            return base
+        except Exception as e:
+            last_err = e
+            continue
+
+    print(f"  [error] No writable output directory found: {last_err}")
+    sys.exit(1)
 
 
 def check_privileges():
@@ -341,7 +375,9 @@ def interactive_mode():
 
     output_dir = input("  Enter path to save notes [./grudarin_output]: ").strip()
     if not output_dir:
-        output_dir = os.path.join(os.getcwd(), "grudarin_output")
+        output_dir = _resolve_output_base_dir(None)
+    else:
+        output_dir = _resolve_output_base_dir(output_dir)
 
     scan_name = input("  Enter a name for this scan [session]: ").strip()
     if not scan_name:
@@ -352,6 +388,7 @@ def interactive_mode():
 
 def run_scan(iface, output_dir, scan_name, args):
     """Run the main scan pipeline."""
+    output_dir = _resolve_output_base_dir(output_dir)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in scan_name)
     session_dir = os.path.join(output_dir, f"grudarin_{safe_name}_{timestamp}")
@@ -594,6 +631,7 @@ def run_scan(iface, output_dir, scan_name, args):
 
 def run_site_scan(domain, output_dir, scan_name, args):
     """Run website/domain reconnaissance and show live graph."""
+    output_dir = _resolve_output_base_dir(output_dir)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in scan_name)
     session_dir = os.path.join(output_dir, f"grudarin_site_{safe_name}_{timestamp}")
@@ -783,12 +821,12 @@ def main():
             print("  [warn] Re-run with: sudo grudarin --scan", args.scan)
             print()
 
-        output_dir = args.output or os.path.join(os.getcwd(), "grudarin_output")
+        output_dir = _resolve_output_base_dir(args.output)
         scan_name = args.name or "session"
         run_scan(args.scan, output_dir, scan_name, args)
     elif args.scan_site:
         print_banner()
-        output_dir = args.output or os.path.join(os.getcwd(), "grudarin_output")
+        output_dir = _resolve_output_base_dir(args.output)
         scan_name = args.name or args.scan_site
         run_site_scan(args.scan_site, output_dir, scan_name, args)
     else:
