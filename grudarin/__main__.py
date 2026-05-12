@@ -25,6 +25,7 @@ from grudarin.capture import PacketCapture
 from grudarin.network_model import NetworkModel
 from grudarin.notes import NotesWriter
 from grudarin.graph_window import GraphWindow
+from grudarin.dashboard_window import DashboardWindow
 from grudarin.vuln_analyzer import VulnAnalyzer
 from grudarin.site_scan import SiteGraphModel, SiteScanner
 
@@ -262,6 +263,14 @@ def parse_args():
             domain = argv[idx + 2]
             argv = argv[:idx] + ["--scan-site", domain] + argv[idx + 3:]
             break
+    # Support shorthand: grudarin --scan wlan0 Pixel
+    for idx, tok in enumerate(argv):
+        if tok == "--scan" and idx + 2 < len(argv):
+            iface = argv[idx + 1]
+            maybe_ssid = argv[idx + 2]
+            if iface and not iface.startswith("-") and maybe_ssid and not maybe_ssid.startswith("-"):
+                argv = argv[:idx] + ["--scan", iface, "--ssid", maybe_ssid] + argv[idx + 3:]
+            break
 
     parser = argparse.ArgumentParser(
         prog="grudarin",
@@ -300,6 +309,10 @@ GRAPH CONTROLS:
         help="Start scan on this interface (e.g., wlan0, eth0, en0)"
     )
     parser.add_argument(
+        "--ssid", type=str, default=None,
+        help="Optional WiFi/hotspot SSID label for capture context"
+    )
+    parser.add_argument(
         "--scan-site", "--site", "-site", metavar="DOMAIN",
         type=str, default=None,
         help="Scan a website/domain (e.g., example.invalid) and build live recon graph"
@@ -323,6 +336,11 @@ GRAPH CONTROLS:
     parser.add_argument(
         "--no-graph", action="store_true",
         help="Run headless without the graph window"
+    )
+    parser.add_argument(
+        "--view", type=str, default="dashboard",
+        choices=["dashboard", "graph"],
+        help="Live UI mode (default: dashboard)"
     )
     parser.add_argument(
         "--ports", type=str, default="1-1024",
@@ -489,11 +507,15 @@ def run_scan(iface, output_dir, scan_name, args):
     tools = check_tools()
 
     print(f"\n  Interface   : {iface}")
+    if args.ssid:
+        print(f"  Target SSID : {args.ssid}")
     print(f"  Output      : {session_dir}")
     print(f"  Scan Name   : {scan_name}")
     print(f"  Duration    : {'Unlimited' if args.duration == 0 else str(args.duration) + 's'}")
     print(f"  Port Range  : {args.ports}")
     print(f"  Graph       : {'Disabled' if args.no_graph else 'Enabled'}")
+    if not args.no_graph:
+        print(f"  View        : {args.view}")
     print(f"  Vuln Scan   : {'Disabled' if args.no_scan else 'Enabled'}")
     print(f"  C++ Scanner : {'Ready' if tools.get('cpp_scanner') else 'Python fallback'}")
     print(f"  Go Netprobe : {'Ready' if tools.get('go_netprobe') else 'Python fallback'}")
@@ -633,14 +655,23 @@ def run_scan(iface, output_dir, scan_name, args):
                 "issues": issues,
             }
 
-        graph_window = GraphWindow(
-            network_model=network_model,
-            stop_event=stop_event,
-            notes_writer=notes_writer,
-            session_dir=session_dir,
-            scan_callback=scan_node_callback,
-        )
-        graph_window.run()
+        if args.view == "graph":
+            graph_window = GraphWindow(
+                network_model=network_model,
+                stop_event=stop_event,
+                notes_writer=notes_writer,
+                session_dir=session_dir,
+                scan_callback=scan_node_callback,
+            )
+            graph_window.run()
+        else:
+            dashboard = DashboardWindow(
+                network_model=network_model,
+                stop_event=stop_event,
+                interface_name=iface,
+                target_ssid=args.ssid or "",
+            )
+            dashboard.run()
     else:
         try:
             if args.duration > 0:
@@ -988,6 +1019,8 @@ def main():
             sys.exit(1)
         if resolved_iface != requested_scan:
             print(f"  [info] Resolved '{requested_scan}' to interface '{resolved_iface}'")
+        if args.ssid:
+            print("  [legal] For authorized monitoring and security testing only.")
 
         if not check_privileges():
             print("  [warn] Not root. Packet capture may fail.")
