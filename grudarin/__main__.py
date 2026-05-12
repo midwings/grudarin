@@ -4,7 +4,7 @@ Run with: sudo grudarin [command] [options]
 
 Workflow:
   1. grudarin                    -- Interactive mode, lists networks
-  2. grudarin --scan <interface> -- Start scan on interface
+  2. grudarin --scan <interface> -- Start live activity monitoring
   3. grudarin --help             -- Show all commands
   4. grudarin --list             -- List available interfaces/networks
 """
@@ -275,31 +275,30 @@ def parse_args():
     parser = argparse.ArgumentParser(
         prog="grudarin",
         description=(
-            "Grudarin - Network Monitor + Vulnerability Scanner + "
-            "Force-Directed Graph Visualization"
+            "Grudarin - Live Network Activity Monitor + Vulnerability Scanner + "
+            "LAN Mapper"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 WORKFLOW:
   1. sudo grudarin --list                 List interfaces and WiFi networks
-  2. sudo grudarin --scan wlan0           Start monitoring on wlan0
+  2. sudo grudarin --scan wlan0           Start live monitoring on wlan0
   3. sudo grudarin --scan eth0 -o ~/notes Start monitoring, save to ~/notes
 
 EXAMPLES:
   sudo grudarin --scan wlan0 --name my_home_scan
+  sudo grudarin --scan wlan0 Pixel
+  sudo grudarin --scan wlan0 --ssid Pixel --view dashboard
+  sudo grudarin --scan wlan0 --view graph
     grudarin --scan-site example.invalid
   sudo grudarin --scan eth0 -o /tmp/reports --ports 1-65535
   sudo grudarin --scan wlan0 --no-graph --duration 120
   sudo grudarin --scan eth0 --targets 192.168.1.1,192.168.1.100
   sudo grudarin --list
 
-GRAPH CONTROLS:
-    Left Click      Select node and inspect all details
-    Left Drag       Move node in graph
-    Left Drag BG    Pan graph canvas
-    Mouse Wheel     Smooth zoom in/out
-    Scan Button     Scan selected node from GUI panel
-    Live Charts     Built-in protocol and top-talker charts
+UI MODES:
+    dashboard       Default live activity and packet dashboard
+    graph           LAN topology graph for structure mapping
     Ctrl+C / Close  Stop capture and print report output path
 """
     )
@@ -335,7 +334,7 @@ GRAPH CONTROLS:
     )
     parser.add_argument(
         "--no-graph", action="store_true",
-        help="Run headless without the graph window"
+        help="Run headless without the live UI window"
     )
     parser.add_argument(
         "--view", type=str, default="dashboard",
@@ -387,8 +386,8 @@ def print_banner():
     print("""
     ================================================================
                           G R U D A R I N
-              Network Monitor + Vulnerability Scanner
-               + Built-in Graph Viewer  v%s
+         Live Activity Monitor + Vulnerability Scanner
+                + Optional LAN Mapper  v%s
     ================================================================
     """ % __version__)
 
@@ -513,9 +512,9 @@ def run_scan(iface, output_dir, scan_name, args):
     print(f"  Scan Name   : {scan_name}")
     print(f"  Duration    : {'Unlimited' if args.duration == 0 else str(args.duration) + 's'}")
     print(f"  Port Range  : {args.ports}")
-    print(f"  Graph       : {'Disabled' if args.no_graph else 'Enabled'}")
+    print(f"  Live UI     : {'Disabled' if args.no_graph else args.view}")
     if not args.no_graph:
-        print(f"  View        : {args.view}")
+        print(f"  Graph Mode  : {'LAN mapping only' if args.view == 'graph' else 'Available via --view graph'}")
     print(f"  Vuln Scan   : {'Disabled' if args.no_scan else 'Enabled'}")
     print(f"  C++ Scanner : {'Ready' if tools.get('cpp_scanner') else 'Python fallback'}")
     print(f"  Go Netprobe : {'Ready' if tools.get('go_netprobe') else 'Python fallback'}")
@@ -555,7 +554,8 @@ def run_scan(iface, output_dir, scan_name, args):
     capture_thread = threading.Thread(target=capture.start, daemon=True)
     capture_thread.start()
     print("  [live] Capture started on", iface)
-    print("  [live] Packets are being captured and analyzed in real time")
+    print("  [live] Packets and network activity are being observed in real time")
+    print("  [live] Authorized monitoring only. HTTPS content stays encrypted; hostnames may appear via DNS/TLS SNI.")
     print()
 
     # Console printer thread (prints live stats in terminal)
@@ -577,7 +577,25 @@ def run_scan(iface, output_dir, scan_name, args):
     printer_thread = threading.Thread(target=console_printer, daemon=True)
     printer_thread.start()
 
-    # Graph or headless
+    def activity_printer():
+        last_index = 0
+        while not stop_event.is_set():
+            events, last_index = network_model.get_activity_since(last_index)
+            for ev in events:
+                target = ev.get("target", "-")
+                source_ip = ev.get("source_ip", "-")
+                event_type = ev.get("event_type", "activity")
+                details = ev.get("details", "")
+                message = f"\n  [activity] {source_ip} -> {target} [{event_type}]"
+                if details:
+                    message += f" {details}"
+                print(message[:220])
+            time.sleep(0.4)
+
+    activity_thread = threading.Thread(target=activity_printer, daemon=True)
+    activity_thread.start()
+
+    # Dashboard, graph, or headless
     if not args.no_graph:
         def scan_node_callback(target_ip):
             """Scan a selected graph node and return structured details."""
