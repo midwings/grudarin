@@ -108,6 +108,7 @@ class PacketRecord:
         self.info = ""
         self.ttl = 0
         self.flags = ""
+        self.activity = ""
 
     def to_dict(self):
         """Serialize packet record to dictionary."""
@@ -124,6 +125,7 @@ class PacketRecord:
             "info": self.info,
             "ttl": self.ttl,
             "flags": self.flags,
+            "activity": self.activity,
         }
 
 
@@ -220,7 +222,9 @@ class NetworkModel:
         self.protocol_counts = defaultdict(int)
         self.dns_cache = {}         # ip -> hostname
         self.changes_log = []       # list of change events
+        self.activity_log = []      # list of high-level activity events
         self._max_packet_log = 50000  # cap to prevent memory issues
+        self._max_activity_log = 2000
 
     def _device_key(self, mac, ip):
         """
@@ -400,6 +404,21 @@ class NetworkModel:
                 if ip in dev.ips and not dev.hostname:
                     dev.hostname = hostname
 
+    def add_activity(self, source_ip, target, event_type, details=""):
+        """Record a high-level realtime activity (DNS/HTTP/etc)."""
+        if not target:
+            return
+        with self.lock:
+            self.activity_log.append({
+                "time": datetime.now().isoformat(),
+                "source_ip": source_ip or "unknown",
+                "target": target,
+                "event_type": event_type or "activity",
+                "details": details or "",
+            })
+            if len(self.activity_log) > self._max_activity_log:
+                self.activity_log = self.activity_log[-self._max_activity_log:]
+
     def get_snapshot(self):
         """
         Get a thread-safe snapshot of the current network state.
@@ -449,6 +468,7 @@ class NetworkModel:
                 "total_connections": len(self.connections),
                 "uptime": time.time() - self.start_time,
                 "protocol_counts": dict(self.protocol_counts),
+                "recent_activity": list(self.activity_log[-20:]),
             }
 
     def get_full_data(self):
@@ -475,4 +495,5 @@ class NetworkModel:
                 ],
                 "dns_cache": dict(self.dns_cache),
                 "changes_log": list(self.changes_log),
+                "activity_log": list(self.activity_log),
             }
