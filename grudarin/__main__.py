@@ -169,6 +169,55 @@ def list_interfaces():
     print()
 
 
+def _get_interfaces():
+    """Return available system interfaces (best effort)."""
+    try:
+        from scapy.all import get_if_list
+        return list(get_if_list())
+    except Exception:
+        return []
+
+
+def _resolve_scan_interface(user_value):
+    """
+    Resolve user-provided scan target to an interface.
+    Accepts direct interface names and, on Linux, connected SSID names.
+    """
+    raw = (user_value or "").strip()
+    if not raw:
+        return None
+
+    interfaces = _get_interfaces()
+    iface_map = {i.lower(): i for i in interfaces}
+    if raw.lower() in iface_map:
+        return iface_map[raw.lower()]
+
+    # Linux convenience: allow passing SSID (e.g., hotspot name) instead of iface.
+    if sys.platform == "linux":
+        try:
+            out = subprocess.check_output(
+                ["nmcli", "-t", "-f", "DEVICE,ACTIVE,SSID", "dev", "wifi"],
+                stderr=subprocess.DEVNULL,
+                timeout=8,
+            ).decode("utf-8", errors="ignore")
+            for line in out.splitlines():
+                parts = line.split(":")
+                if len(parts) < 3:
+                    continue
+                dev = parts[0].strip()
+                active = parts[1].strip().lower()
+                ssid = ":".join(parts[2:]).strip()
+                if active == "yes" and ssid.lower() == raw.lower():
+                    if dev in interfaces:
+                        return dev
+                    if dev.lower() in iface_map:
+                        return iface_map[dev.lower()]
+        except Exception:
+            pass
+
+    return None
+
+
 def parse_args():
     """Parse command line arguments."""
     argv = list(sys.argv[1:])
@@ -891,14 +940,24 @@ def main():
 
     if args.scan:
         print_banner()
+        requested_scan = args.scan
+        resolved_iface = _resolve_scan_interface(requested_scan)
+        if not resolved_iface:
+            print(f"  [error] Interface not found: {requested_scan}")
+            print("  [hint] Use a real interface name (e.g., wlan0/eth0/en0), not SSID.")
+            print("  [hint] Run: sudo grudarin --list")
+            sys.exit(1)
+        if resolved_iface != requested_scan:
+            print(f"  [info] Resolved '{requested_scan}' to interface '{resolved_iface}'")
+
         if not check_privileges():
             print("  [warn] Not root. Packet capture may fail.")
-            print("  [warn] Re-run with: sudo grudarin --scan", args.scan)
+            print("  [warn] Re-run with: sudo grudarin --scan", resolved_iface)
             print()
 
         output_dir = _resolve_output_base_dir(args.output)
         scan_name = args.name or "session"
-        run_scan(args.scan, output_dir, scan_name, args)
+        run_scan(resolved_iface, output_dir, scan_name, args)
     elif args.scan_site:
         print_banner()
         output_dir = _resolve_output_base_dir(args.output)
