@@ -139,6 +139,9 @@ sudo grudarin --scan wlan0 -f "tcp port 80 or tcp port 443"
 
 # Full help
 grudarin --help
+
+# Update tool to latest version
+grudarin --update
 ```
 
 ## Graph Controls
