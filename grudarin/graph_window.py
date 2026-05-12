@@ -72,6 +72,7 @@ class GraphWindow:
         self.history = []
         self.relation_counts = {}
         self.node_type_counts = {}
+        self.recent_activity = []
 
         self.root = None
         self.canvas = None
@@ -103,6 +104,7 @@ class GraphWindow:
         devices, connections = self.model.get_snapshot()
         stats = self.model.get_stats()
         self.protocol_counts = stats.get("protocol_counts", {})
+        self.recent_activity = stats.get("recent_activity", [])
 
         cx = self.graph_w / 2.0
         cy = self.h / 2.0
@@ -459,6 +461,27 @@ class GraphWindow:
             cv.create_text(228, y + 6, text=f"{rel[:14]}: {count}", fill=self.TEXT, font=("Courier", 9), anchor="w")
             y += 17
 
+    def _draw_activity_feed(self, cv):
+        cv.delete("all")
+        w = 360
+        h = 200
+        cv.create_rectangle(0, 0, w, h, fill=self.PANEL, outline="#262626")
+        cv.create_text(8, 8, anchor="nw", text="Realtime Activity Feed", fill=self.ACCENT, font=("Courier", 10, "bold"))
+
+        items = list(self.recent_activity)[-8:]
+        if not items:
+            cv.create_text(10, 42, anchor="nw", text="No DNS/HTTP activity yet", fill=self.DIM, font=("Courier", 9))
+            return
+
+        y = 28
+        for it in items:
+            src = str(it.get("source_ip", "unknown"))[:15]
+            et = str(it.get("event_type", "activity"))[:10]
+            tgt = str(it.get("target", ""))[:35]
+            line = f"{src} [{et}] {tgt}"
+            cv.create_text(10, y, anchor="nw", text=line, fill=self.TEXT, font=("Courier", 8))
+            y += 20
+
     @staticmethod
     def _fmt_bytes(n):
         if n < 1024:
@@ -721,6 +744,7 @@ class GraphWindow:
         self._draw_relation_chart(self.relation_canvas)
         self._draw_talker_chart(self.talker_canvas)
         self._draw_timeline_chart(self.timeline_canvas)
+        self._draw_activity_feed(self.activity_canvas)
 
         self.root.after(33, self._loop_tick)
 
@@ -862,6 +886,15 @@ class GraphWindow:
             highlightthickness=0,
         )
         self.timeline_canvas.pack(fill="x", padx=8, pady=(0, 8))
+
+        self.activity_canvas = tk.Canvas(
+            side,
+            width=360,
+            height=200,
+            bg=self.PANEL,
+            highlightthickness=0,
+        )
+        self.activity_canvas.pack(fill="x", padx=8, pady=(0, 8))
 
         def on_close():
             print(f"\n  [info] Graph closed. Reports are stored in: {self.session_dir}")
