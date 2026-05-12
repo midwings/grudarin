@@ -277,7 +277,7 @@ class PacketCapture:
     def start(self):
         """Start capturing packets. Blocks until stop_event is set."""
         try:
-            from scapy.all import sniff, conf
+            from scapy.all import sniff
         except ImportError:
             print("  Error: scapy is required. Install: pip install scapy")
             self.stop_event.set()
@@ -287,24 +287,35 @@ class PacketCapture:
         import logging
         logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
 
-        try:
-            sniff(
-                iface=self.interface,
-                prn=self._process_packet,
-                stop_filter=self._stop_filter,
-                store=False,
-                promisc=self.promisc,
-                filter=self.bpf_filter,
-            )
-        except PermissionError:
-            print(
-                "\n  Error: Permission denied. "
-                "Run with sudo or as Administrator."
-            )
-            self.stop_event.set()
-        except OSError as e:
-            print(f"\n  Error: Could not open interface: {e}")
-            self.stop_event.set()
-        except Exception as e:
-            print(f"\n  Error during capture: {e}")
-            self.stop_event.set()
+        while not self.stop_event.is_set():
+            try:
+                sniff(
+                    iface=self.interface,
+                    prn=self._process_packet,
+                    stop_filter=self._stop_filter,
+                    store=False,
+                    promisc=self.promisc,
+                    filter=self.bpf_filter,
+                )
+                # If sniff returned naturally without stop signal, retry to keep capture alive.
+                if not self.stop_event.is_set():
+                    time.sleep(0.4)
+            except PermissionError:
+                print(
+                    "\n  Error: Permission denied. "
+                    "Run with sudo or as Administrator."
+                )
+                self.stop_event.set()
+                return
+            except OSError as e:
+                print(f"\n  Error: Could not open interface: {e}")
+                if self.stop_event.is_set():
+                    return
+                print("  [live] Capture retrying in 2s... Press Ctrl+C to stop.")
+                time.sleep(2)
+            except Exception as e:
+                print(f"\n  Error during capture: {e}")
+                if self.stop_event.is_set():
+                    return
+                print("  [live] Capture retrying in 2s... Press Ctrl+C to stop.")
+                time.sleep(2)
