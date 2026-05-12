@@ -55,15 +55,110 @@ class NotesWriter:
         except Exception:
             pass
 
-    def write_final_report(self, network_model, findings=None):
+    def write_final_report(self, network_model, findings=None, privacy_mode=False, export_graph="none"):
         """Write the complete session report in Markdown and JSON."""
         data = network_model.get_full_data()
         findings_list = findings or []
+        if privacy_mode:
+            data = self._apply_privacy_mask(data)
         self._write_json_report(data, findings_list)
         self._write_markdown_report(data, findings_list)
+        self._write_graph_exports(data, export_graph or "none")
         if self._packet_log_handle:
             self._packet_log_handle.close()
             self._packet_log_handle = None
+
+    def _mask_ip(self, ip):
+        if not ip or ip == "unknown":
+            return ip
+        if ":" in ip:
+            parts = ip.split(":")
+            if len(parts) > 2:
+                return ":".join(parts[:2] + ["xxxx"] * max(0, len(parts) - 2))
+            return "xxxx::xxxx"
+        bits = ip.split(".")
+        if len(bits) == 4:
+            return ".".join(bits[:2] + ["x", "x"])
+        return ip
+
+    def _apply_privacy_mask(self, data):
+        masked = dict(data)
+        devices = {}
+        for k, dev in data.get("devices", {}).items():
+            d = dict(dev)
+            d["ip"] = self._mask_ip(d.get("ip"))
+            if "all_ips" in d:
+                d["all_ips"] = [self._mask_ip(x) for x in d.get("all_ips", [])]
+            devices[k] = d
+        masked["devices"] = devices
+
+        dns_cache = {}
+        for ip, host in data.get("dns_cache", {}).items():
+            dns_cache[self._mask_ip(ip)] = host
+        masked["dns_cache"] = dns_cache
+
+        activity = []
+        for ev in data.get("activity_log", []):
+            e = dict(ev)
+            e["source_ip"] = self._mask_ip(e.get("source_ip"))
+            activity.append(e)
+        masked["activity_log"] = activity
+        return masked
+
+    def _write_graph_exports(self, data, export_graph):
+        mode = (export_graph or "none").lower()
+        if mode not in {"json", "csv", "both"}:
+            return
+
+        nodes = []
+        for key, dev in data.get("devices", {}).items():
+            nodes.append({
+                "id": key,
+                "label": dev.get("hostname") or dev.get("ip") or key,
+                "ip": dev.get("ip", "unknown"),
+                "mac": dev.get("mac", "unknown"),
+                "node_type": dev.get("node_type", "DEVICE"),
+                "packets_sent": int(dev.get("packets_sent", 0)),
+                "packets_received": int(dev.get("packets_received", 0)),
+                "bytes_sent": int(dev.get("bytes_sent", 0)),
+                "bytes_received": int(dev.get("bytes_received", 0)),
+            })
+
+        edges = []
+        for c in data.get("connections", []):
+            edges.append({
+                "source": c.get("source", ""),
+                "destination": c.get("destination", ""),
+                "packet_count": int(c.get("packet_count", 0)),
+                "byte_count": int(c.get("byte_count", 0)),
+                "protocols": ",".join(c.get("protocols", [])),
+            })
+
+        if mode in {"json", "both"}:
+            out = {
+                "generated_at": datetime.now().isoformat(),
+                "nodes": nodes,
+                "edges": edges,
+            }
+            with open(os.path.join(self.session_dir, "graph_export.json"), "w", encoding="utf-8") as f:
+                json.dump(out, f, indent=2)
+
+        if mode in {"csv", "both"}:
+            nodes_path = os.path.join(self.session_dir, "graph_nodes.csv")
+            edges_path = os.path.join(self.session_dir, "graph_edges.csv")
+            with open(nodes_path, "w", encoding="utf-8") as f:
+                f.write("id,label,ip,mac,node_type,packets_sent,packets_received,bytes_sent,bytes_received\n")
+                for n in nodes:
+                    f.write(
+                        f"\"{n['id']}\",\"{n['label']}\",\"{n['ip']}\",\"{n['mac']}\",\"{n['node_type']}\","
+                        f"{n['packets_sent']},{n['packets_received']},{n['bytes_sent']},{n['bytes_received']}\n"
+                    )
+            with open(edges_path, "w", encoding="utf-8") as f:
+                f.write("source,destination,packet_count,byte_count,protocols\n")
+                for e in edges:
+                    f.write(
+                        f"\"{e['source']}\",\"{e['destination']}\",{e['packet_count']},{e['byte_count']},\"{e['protocols']}\"\n"
+                    )
 
     def _write_json_report(self, data, findings):
         """Write full session data as JSON."""
@@ -226,6 +321,25 @@ class NotesWriter:
             md.append("|------------|----------|")
             for ip, hostname in sorted(dns_cache.items()):
                 md.append(f"| `{ip}` | `{hostname}` |")
+            md.append("")
+
+        # ============================================================
+        # RECENT NETWORK ACTIVITY
+        # ============================================================
+        activity = data.get("activity_log", [])
+        if activity:
+            md.append("## Realtime Activity Timeline")
+            md.append("")
+            md.append("| Time | Source IP | Activity Type | Target | Details |")
+            md.append("|------|-----------|---------------|--------|---------|")
+            for item in activity[-200:]:
+                md.append(
+                    f"| `{item.get('time','')}` | "
+                    f"`{item.get('source_ip','unknown')}` | "
+                    f"{item.get('event_type','activity')} | "
+                    f"`{item.get('target','')[:80]}` | "
+                    f"{(item.get('details','') or '').replace('|', '/')} |"
+                )
             md.append("")
 
         # ============================================================
