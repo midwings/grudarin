@@ -6,7 +6,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="grudarin",
-    version="2.0.0",
+    version="2.1.0",
     description="Network Monitoring Tool with Force-Directed Graph and Vulnerability Scanner",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
@@ -16,7 +16,6 @@ setup(
     python_requires=">=3.8",
     install_requires=[
         "scapy>=2.5.0",
-        "pygame>=2.5.0",
     ],
     entry_points={
         "console_scripts": [
