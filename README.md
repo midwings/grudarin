@@ -103,6 +103,12 @@ sudo grudarin --scan wlan0
 grudarin --scan-site example.com
 ```
 
+Update to latest version:
+
+```bash
+grudarin --update
+```
+
 ### Windows
 
 ```text
