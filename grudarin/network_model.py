@@ -419,6 +419,22 @@ class NetworkModel:
             if len(self.activity_log) > self._max_activity_log:
                 self.activity_log = self.activity_log[-self._max_activity_log:]
 
+    def get_activity_since(self, start_index=0):
+        """Return activity entries added since a given index."""
+        with self.lock:
+            total = len(self.activity_log)
+            if start_index < 0:
+                start_index = 0
+            if start_index > total:
+                start_index = total
+            return list(self.activity_log[start_index:]), total
+
+    def get_recent_packets(self, limit=30):
+        """Return the most recent packet records as serializable dicts."""
+        with self.lock:
+            tail = self.packet_log[-max(1, int(limit)):]
+            return [pkt.to_dict() for pkt in tail]
+
     def get_snapshot(self):
         """
         Get a thread-safe snapshot of the current network state.
