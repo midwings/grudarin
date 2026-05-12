@@ -7,6 +7,7 @@ import math
 import random
 import threading
 import time
+from grudarin import __version__
 
 try:
     import tkinter as tk
@@ -765,7 +766,7 @@ class GraphWindow:
                 time.sleep(0.5)
             return
 
-        self.root.title("Grudarin v2.0.0 - Built-in Graph View")
+        self.root.title(f"Grudarin v{__version__} - Built-in Graph View")
         self.root.geometry(f"{self.w}x{self.h}")
         self.root.configure(bg=self.BG)
 
