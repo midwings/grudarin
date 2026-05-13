@@ -257,6 +257,22 @@ def _resolve_scan_interface(user_value):
         except Exception:
             pass
 
+        # Try iw dev as second option for connected SSID
+        try:
+            out = subprocess.check_output(["iw", "dev"], stderr=subprocess.DEVNULL, timeout=5).decode("utf-8", errors="ignore")
+            curr_iface = None
+            for line in out.splitlines():
+                line = line.strip()
+                if line.startswith("Interface"):
+                    curr_iface = line.split()[1]
+                if line.startswith("ssid") and curr_iface:
+                    found_ssid = line.split(" ", 1)[1].strip()
+                    if found_ssid.lower() == raw.lower():
+                        if curr_iface in interfaces: return curr_iface
+                        if curr_iface.lower() in iface_map: return iface_map[curr_iface.lower()]
+        except Exception:
+            pass
+
         # Fallback: if SSID exists in scan list, pick connected wifi device or first wifi device.
         try:
             nets = discover_wifi_networks()
@@ -337,22 +353,22 @@ def parse_args():
     parser = argparse.ArgumentParser(
         prog="grudarin",
         description=(
-            "Grudarin - Live Network Activity Monitor + Vulnerability Scanner + "
-            "LAN Mapper"
+            "Grudarin - Network Monitor (Spy of your own network) + Vulnerability Scanner"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 WORKFLOW:
   1. sudo grudarin --list                 List interfaces and WiFi networks
-  2. sudo grudarin --scan wlan0           Start live monitoring on wlan0
-  3. sudo grudarin --scan eth0 -o ~/notes Start monitoring, save to ~/notes
+  2. sudo grudarin --scan wlan0           Start live monitoring on wlan0 (Spy mode)
+  3. sudo grudarin -s example.com         Scan a site and track visitors
+  4. sudo grudarin --scan eth0 -o ~/notes Start monitoring, save detailed notes
 
 EXAMPLES:
   sudo grudarin --scan wlan0 --name my_home_scan
   sudo grudarin --scan wlan0 Pixel
   sudo grudarin --scan wlan0 --ssid Pixel --view dashboard
   sudo grudarin --scan wlan0 --view graph
-    grudarin --scan-site example.invalid
+  grudarin -s example.com
   sudo grudarin --scan eth0 -o /tmp/reports --ports 1-65535
   sudo grudarin --scan wlan0 --no-graph --duration 120
   sudo grudarin --scan eth0 --targets 192.168.1.1,192.168.1.100
@@ -360,7 +376,7 @@ EXAMPLES:
 
 UI MODES:
     dashboard       Default live activity and packet dashboard
-    graph           LAN topology graph for structure mapping
+    graph           Network Activity Map for structure visualization
     Ctrl+C / Close  Stop capture and print report output path
 """
     )
@@ -374,7 +390,7 @@ UI MODES:
         help="Optional WiFi/hotspot SSID label for capture context"
     )
     parser.add_argument(
-        "--scan-site", "--site", "-site", metavar="DOMAIN",
+        "--scan-site", "--site", "-site", "-s", metavar="DOMAIN",
         type=str, default=None,
         help="Scan a website/domain (e.g., example.invalid) and build live recon graph"
     )
@@ -420,6 +436,10 @@ UI MODES:
         help="Enable promiscuous mode (default: on)"
     )
     parser.add_argument(
+        "--monitor", action="store_true",
+        help="Attempt to put interface in monitor mode (Linux only)"
+    )
+    parser.add_argument(
         "--filter", "-f", type=str, default=None,
         help="BPF filter (e.g., 'tcp port 80')"
     )
@@ -448,8 +468,8 @@ def print_banner():
     print("""
     ================================================================
                           G R U D A R I N
-         Live Activity Monitor + Vulnerability Scanner
-                + Optional LAN Mapper  v%s
+           Network Monitor (Spy) + Vulnerability Scanner
+                           v%s
     ================================================================
     """ % __version__)
 
@@ -484,6 +504,26 @@ def _resolve_output_base_dir(requested_dir=None):
 
     print(f"  [error] No writable output directory found: {last_err}")
     sys.exit(1)
+
+
+def _set_monitor_mode(iface, enabled=True):
+    """Enable or disable monitor mode on Linux."""
+    if sys.platform != "linux":
+        return False
+    try:
+        # Check if interface exists
+        subprocess.check_call(["ip", "link", "show", iface], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        mode = "monitor" if enabled else "managed"
+        print(f"  [monitor] Setting {iface} to {mode} mode...")
+
+        subprocess.check_call(["ip", "link", "set", iface, "down"])
+        subprocess.check_call(["iw", "dev", iface, "set", "type", mode])
+        subprocess.check_call(["ip", "link", "set", iface, "up"])
+        return True
+    except Exception as e:
+        print(f"  [error] Failed to set monitor mode: {e}")
+        return False
 
 
 def check_privileges():
@@ -576,7 +616,7 @@ def run_scan(iface, output_dir, scan_name, args):
     print(f"  Port Range  : {args.ports}")
     print(f"  Live UI     : {'Disabled' if args.no_graph else args.view}")
     if not args.no_graph:
-        print(f"  Graph Mode  : {'LAN mapping only' if args.view == 'graph' else 'Available via --view graph'}")
+        print(f"  Map Mode    : {'Network Activity Map' if args.view == 'graph' else 'Available via --view graph'}")
     print(f"  Vuln Scan   : {'Disabled' if args.no_scan else 'Enabled'}")
     print(f"  C++ Scanner : {'Ready' if tools.get('cpp_scanner') else 'Python fallback'}")
     print(f"  Go Netprobe : {'Ready' if tools.get('go_netprobe') else 'Python fallback'}")
@@ -852,9 +892,27 @@ def run_site_scan(domain, output_dir, scan_name, args):
     print()
 
     model = SiteGraphModel()
-    notes_writer = NotesWriter(session_dir)
+
+    # Also start a packet capture to track local visitors to this site
+    local_net_model = NetworkModel()
     stop_event = threading.Event()
-    scanner = SiteScanner(model=model, domain=domain, stop_event=stop_event)
+
+    # Try to find a default interface for capture
+    from scapy.all import conf
+    default_iface = conf.iface
+    capture = None
+    if default_iface:
+        from grudarin.notes import NotesWriter as DummyNotesWriter
+        capture = PacketCapture(
+            interface=str(default_iface),
+            network_model=local_net_model,
+            notes_writer=DummyNotesWriter(tempfile.gettempdir()),
+            stop_event=stop_event
+        )
+        threading.Thread(target=capture.start, daemon=True).start()
+
+    notes_writer = NotesWriter(session_dir)
+    scanner = SiteScanner(model=model, domain=domain, stop_event=stop_event, network_model=local_net_model)
 
     def on_signal(_sig, _frame):
         print("\n\n  Stopping site scan...")
@@ -1082,6 +1140,13 @@ def _run_update(args):
 
 def main():
     """Main entry point."""
+    # Wayland support: Tkinter (via Tcl/Tk) often fails on Wayland unless forced to X11.
+    if os.environ.get("XDG_SESSION_TYPE") == "wayland":
+        if "GDK_BACKEND" not in os.environ:
+            os.environ["GDK_BACKEND"] = "x11"
+        if "QT_QPA_PLATFORM" not in os.environ:
+            os.environ["QT_QPA_PLATFORM"] = "xcb"
+
     args = parse_args()
 
     if args.list:
@@ -1098,6 +1163,16 @@ def main():
     if args.scan:
         print_banner()
         requested_scan = args.scan
+
+        if args.monitor:
+            if sys.platform == "linux":
+                if not check_privileges():
+                    print("  [!] Root privileges required for monitor mode.")
+                    sys.exit(1)
+                _set_monitor_mode(requested_scan, True)
+            else:
+                print("  [warn] Monitor mode only supported on Linux via 'iw'.")
+
         resolved_iface = _resolve_scan_interface(requested_scan)
         if not resolved_iface:
             suggested_iface = _suggest_interface(requested_scan)
@@ -1125,9 +1200,11 @@ def main():
                 print(f"  [hint] If intended, use: --ssid {args.name}")
 
         if not check_privileges():
-            print("  [warn] Not root. Packet capture may fail.")
-            print("  [warn] Re-run with: sudo grudarin --scan", resolved_iface)
+            print("  [!] ERROR: Root privileges required for network monitoring.")
+            print("  [!] Grudarin needs raw socket access to capture packets.")
+            print(f"  [!] Please run: sudo grudarin --scan {resolved_iface}")
             print()
+            sys.exit(1)
 
         output_dir = _resolve_output_base_dir(args.output)
         scan_name = args.name or "session"
