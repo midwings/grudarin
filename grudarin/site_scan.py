@@ -235,10 +235,11 @@ class SiteScanner:
         re.compile(r"jsdelivr\.net/npm/(@?[\w\.-]+(?:/[\w\.-]+)?)(?:@([\w\.-]+))?", re.I),
     ]
 
-    def __init__(self, model, domain, stop_event):
+    def __init__(self, model, domain, stop_event, network_model=None):
         self.model = model
         self.domain = domain.strip().lower()
         self.stop_event = stop_event
+        self.network_model = network_model
         self.seen_hosts = set()
         self.seen_ips = set()
         self.seen_urls = set()
@@ -334,6 +335,10 @@ class SiteScanner:
             queue.append(host)
 
         while queue and not self.stop_event.is_set():
+            # Track local visitors if network_model is provided
+            if self.network_model:
+                self._track_local_visitors()
+
             host = queue.pop(0).strip().lower().rstrip(".")
             if not host or host in self.seen_hosts:
                 continue
@@ -718,6 +723,24 @@ class SiteScanner:
                         "low",
                         "Restrict administrative paths to trusted networks.",
                     )
+
+    def _track_local_visitors(self):
+        """Identify local devices that have communicated with resolved target IPs."""
+        if not self.network_model: return
+
+        # Use the activity_log from network_model to find local devices visiting our targets
+        stats = self.network_model.get_stats()
+        recent = stats.get("recent_activity", [])
+        for ev in recent:
+            target = ev.get("target", "")
+            # If target is one of our hosts or IPs
+            if target in self.seen_hosts or target in self.seen_ips or any(h in target for h in self.seen_hosts):
+                src = ev.get("source_ip", "unknown")
+                visitor_key = self.model.add_entity("VISITOR", src, {"ip": src, "node_type": "VISITOR"})
+                # Link visitor to the domain
+                seed_key = self.model._entity_key("DNS_NAME", self.domain)
+                if seed_key in self.model.entities:
+                    self.model.add_connection(visitor_key, seed_key, "visited", byte_count=0)
 
     def _crtsh_subdomains(self, domain):
         """Best-effort crt.sh lookup for subdomains."""
