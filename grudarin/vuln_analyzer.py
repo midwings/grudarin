@@ -123,31 +123,9 @@ class VulnAnalyzer:
         self.findings = []
         self._lock = threading.Lock()
 
-        # Find tool paths
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        self.scanner_path = os.path.join(base_dir, "bin", "grudarin_scanner")
-        self.lua_rules_path = os.path.join(base_dir, "lua_rules", "security_rules.lua")
-
-        # Check what tools are available
-        self.has_cpp_scanner = os.path.isfile(self.scanner_path) and os.access(
-            self.scanner_path, os.X_OK
-        )
-        self.has_lua = self._check_lua()
-
-    def _check_lua(self):
-        """Check if Lua is available."""
-        for lua_cmd in ["lua5.4", "lua5.3", "lua"]:
-            try:
-                result = subprocess.run(
-                    [lua_cmd, "-v"],
-                    capture_output=True, timeout=5
-                )
-                if result.returncode == 0:
-                    self._lua_cmd = lua_cmd
-                    return True
-            except (FileNotFoundError, subprocess.TimeoutExpired):
-                continue
-        return False
+        # External tools removed for core monitor focus
+        self.has_cpp_scanner = False
+        self.has_lua = False
 
     def _add_finding(self, severity, title, description, affected="", recommendation=""):
         """Thread-safe finding addition."""
@@ -156,27 +134,6 @@ class VulnAnalyzer:
                 Finding(severity, title, description, affected, recommendation)
             )
 
-    # ----------------------------------------------------------------
-    # C++ Scanner Integration
-    # ----------------------------------------------------------------
-
-    def run_cpp_scanner(self, target_ip, port_range="1-1024", threads=50, timeout=500):
-        """Run the C++ port scanner on a target."""
-        if not self.has_cpp_scanner:
-            return None
-
-        try:
-            result = subprocess.run(
-                [self.scanner_path, target_ip, port_range, str(threads), str(timeout)],
-                capture_output=True,
-                text=True,
-                timeout=300,
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                return json.loads(result.stdout)
-        except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception) as e:
-            print(f"  Scanner error: {e}")
-        return None
 
     # ----------------------------------------------------------------
     # Python Port Scanner Fallback
@@ -225,129 +182,6 @@ class VulnAnalyzer:
 
         return sorted(open_ports, key=lambda x: x["port"])
 
-    # ----------------------------------------------------------------
-    # Lua Rules Integration
-    # ----------------------------------------------------------------
-
-    def run_lua_rules(self, data):
-        """Execute Lua security rules against the network data."""
-        if not self.has_lua or not os.path.isfile(self.lua_rules_path):
-            return None
-
-        # Write data as Lua-compatible JSON for the rules engine
-        data_json = json.dumps(data, default=str)
-        lua_wrapper = self._generate_lua_wrapper(data_json)
-
-        wrapper_path = os.path.join(self.session_dir, "_temp_rules_input.lua")
-        try:
-            with open(wrapper_path, "w", encoding="utf-8") as f:
-                f.write(lua_wrapper)
-
-            result = subprocess.run(
-                [self._lua_cmd, wrapper_path],
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
-
-            # Clean up temp file
-            os.remove(wrapper_path)
-
-            if result.returncode == 0 and result.stdout.strip():
-                return json.loads(result.stdout)
-            if result.returncode != 0:
-                err_out = (result.stderr or "").strip()
-                if err_out and os.environ.get("GRUDARIN_DEBUG") == "1":
-                    print(f"  Lua rules stderr: {err_out[:400]}")
-        except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception) as e:
-            if os.environ.get("GRUDARIN_DEBUG") == "1":
-                print(f"  Lua rules error: {e}")
-            try:
-                os.remove(wrapper_path)
-            except Exception:
-                pass
-
-        return None
-
-    def _generate_lua_wrapper(self, data_json):
-        """Generate a Lua script that loads rules and processes data."""
-        rules_path = self.lua_rules_path.replace("\\", "/")
-
-        # Escape JSON for safe embedding in a Lua quoted string.
-        escaped = data_json.replace("\\", "\\\\").replace('"', '\\"')
-        escaped = escaped.replace("\n", "\\n").replace("\r", "\\r")
-
-        wrapper = """
--- Auto-generated wrapper for Grudarin rules execution
--- Minimal JSON parser for Lua (handles the data we need)
-
-local function parse_json(s)
-    -- Use Lua's load() with safe environment for simple JSON
-    -- Replace JSON true/false/null with Lua equivalents
-    s = s:gsub('"([^"]-)"%s*:', '["%1"]=')
-    s = s:gsub('%[%s*%{', '{{')
-    s = s:gsub('%}%s*%]', '}}')
-    s = s:gsub('%[%s*%]', '{{}}')
-    s = s:gsub(': *true', '=true')
-    s = s:gsub(': *false', '=false')
-    s = s:gsub(': *null', '=nil')
-    -- Wrap in return statement
-    local fn, err = load("return " .. s, "json", "t", {})
-    if fn then
-        local ok, result = pcall(fn)
-        if ok then return result end
-    end
-    return nil
-end
-
--- Alternative: build data table directly from known structure
-local function build_data()
-    local json_str = "__GRUDARIN_JSON__"
-    local data = parse_json(json_str)
-    if not data then
-        -- Fallback: return empty structure
-        data = {
-            protocol_counts = {},
-            total_packets = 0,
-            devices = {},
-            scan_results = {},
-        }
-    end
-    return data
-end
-
--- Load the rules
-dofile("__GRUDARIN_RULES_PATH__")
-
--- Execute
-local data = build_data()
-local results = run_all_rules(data)
-
--- Output as JSON
-local function to_json_string(s)
-    return '"' .. s:gsub('\\', '\\\\'):gsub('"', '\\"'):gsub('\\n', '\\n'):gsub('\\r', '\\r') .. '"'
-end
-
-io.write("[\\n")
-for i, f in ipairs(results) do
-    io.write("  {\\n")
-    io.write('    "severity": ' .. to_json_string(f.severity or "info") .. ',\\n')
-    io.write('    "title": ' .. to_json_string(f.title or "") .. ',\\n')
-    io.write('    "description": ' .. to_json_string(f.description or "") .. ',\\n')
-    io.write('    "affected": ' .. to_json_string(f.affected or "") .. ',\\n')
-    io.write('    "recommendation": ' .. to_json_string(f.recommendation or "") .. '\\n')
-    if i < #results then
-        io.write("  },\\n")
-    else
-        io.write("  }\\n")
-    end
-end
-io.write("]\\n")
-"""
-
-        wrapper = wrapper.replace("__GRUDARIN_JSON__", escaped)
-        wrapper = wrapper.replace("__GRUDARIN_RULES_PATH__", rules_path)
-        return wrapper
 
     # ----------------------------------------------------------------
     # Python Rules Fallback
@@ -531,8 +365,8 @@ io.write("]\\n")
     def analyze(self, scan_targets=None, port_range="1-1024"):
         """
         Run the full vulnerability analysis.
-        1. Port scan discovered devices (C++ or Python)
-        2. Run security rules (Lua or Python)
+        1. Port scan discovered devices (Python fallback)
+        2. Run security rules (Python fallback)
         3. Collect all findings
         """
         self.findings = []
@@ -548,46 +382,37 @@ io.write("]\\n")
 
         # Step 1: Port scan if targets provided
         if scan_targets:
-            print("  Running port scanner...")
+            print("  Running Python port scanner...")
             for target in scan_targets:
-                scan_result = None
-                if self.has_cpp_scanner:
-                    print(f"    C++ scanner -> {target}")
-                    results = self.run_cpp_scanner(target, port_range)
-                    if results:
-                        rules_data["scan_results"].extend(results)
-                        scan_result = results
-                else:
-                    print(f"    Python scanner -> {target}")
-                    parts = port_range.split("-")
-                    p_start = int(parts[0]) if len(parts) >= 1 else 1
-                    p_end = int(parts[1]) if len(parts) >= 2 else 1024
-                    open_ports = self.run_python_scanner(target, p_start, p_end)
-                    if open_ports:
-                        host_result = {
-                            "ip": target,
-                            "alive": True,
-                            "open_ports": open_ports,
-                        }
-                        # Check for vulnerabilities on open ports
-                        for p in open_ports:
-                            port_num = p["port"]
-                            p["service"] = self._get_service(port_num)
-                            p["vulnerability"] = ""
-                            p["severity"] = ""
-                            # Check dangerous
-                            if port_num in self.DANGEROUS_PORTS:
-                                name, sev, risk = self.DANGEROUS_PORTS[port_num]
-                                p["vulnerability"] = risk
-                                p["severity"] = sev
-                            # Check banner
-                            if p.get("banner"):
-                                for pattern, name, sev, desc in self.VULN_SIGNATURES:
-                                    if pattern in p["banner"]:
-                                        p["vulnerability"] = desc
-                                        p["severity"] = sev
-                                        break
-                        rules_data["scan_results"].append(host_result)
+                parts = port_range.split("-")
+                p_start = int(parts[0]) if len(parts) >= 1 else 1
+                p_end = int(parts[1]) if len(parts) >= 2 else 1024
+                open_ports = self.run_python_scanner(target, p_start, p_end)
+                if open_ports:
+                    host_result = {
+                        "ip": target,
+                        "alive": True,
+                        "open_ports": open_ports,
+                    }
+                    # Check for vulnerabilities on open ports
+                    for p in open_ports:
+                        port_num = p["port"]
+                        p["service"] = self._get_service(port_num)
+                        p["vulnerability"] = ""
+                        p["severity"] = ""
+                        # Check dangerous
+                        if port_num in self.DANGEROUS_PORTS:
+                            name, sev, risk = self.DANGEROUS_PORTS[port_num]
+                            p["vulnerability"] = risk
+                            p["severity"] = sev
+                        # Check banner
+                        if p.get("banner"):
+                            for pattern, name, sev, desc in self.VULN_SIGNATURES:
+                                if pattern in p["banner"]:
+                                    p["vulnerability"] = desc
+                                    p["severity"] = sev
+                                    break
+                    rules_data["scan_results"].append(host_result)
         else:
             # Auto-scan discovered devices
             devices = data.get("devices", {})
@@ -602,64 +427,43 @@ io.write("]\\n")
                 targets_to_scan = targets_to_scan[:20]
                 print(f"  Auto-scanning {len(targets_to_scan)} discovered devices...")
                 for target in targets_to_scan:
-                    if self.has_cpp_scanner:
-                        results = self.run_cpp_scanner(target, port_range, threads=30, timeout=300)
-                        if results:
-                            rules_data["scan_results"].extend(results)
-                    else:
-                        parts = port_range.split("-")
-                        p_start = int(parts[0]) if len(parts) >= 1 else 1
-                        p_end = int(parts[1]) if len(parts) >= 2 else 1024
-                        open_ports = self.run_python_scanner(target, p_start, p_end, threads=30, timeout=0.3)
-                        if open_ports:
-                            for p in open_ports:
-                                pn = p["port"]
-                                p["service"] = self._get_service(pn)
-                                p["vulnerability"] = ""
-                                p["severity"] = ""
-                                if pn in self.DANGEROUS_PORTS:
-                                    nm, sv, rk = self.DANGEROUS_PORTS[pn]
-                                    p["vulnerability"] = rk
-                                    p["severity"] = sv
-                                if p.get("banner"):
-                                    for pat, nm, sv, dsc in self.VULN_SIGNATURES:
-                                        if pat in p["banner"]:
-                                            p["vulnerability"] = dsc
-                                            p["severity"] = sv
-                                            break
-                            rules_data["scan_results"].append({
-                                "ip": target,
-                                "alive": True,
-                                "open_ports": open_ports,
-                            })
+                    parts = port_range.split("-")
+                    p_start = int(parts[0]) if len(parts) >= 1 else 1
+                    p_end = int(parts[1]) if len(parts) >= 2 else 1024
+                    open_ports = self.run_python_scanner(target, p_start, p_end, threads=30, timeout=0.3)
+                    if open_ports:
+                        for p in open_ports:
+                            pn = p["port"]
+                            p["service"] = self._get_service(pn)
+                            p["vulnerability"] = ""
+                            p["severity"] = ""
+                            if pn in self.DANGEROUS_PORTS:
+                                nm, sv, rk = self.DANGEROUS_PORTS[pn]
+                                p["vulnerability"] = rk
+                                p["severity"] = sv
+                            if p.get("banner"):
+                                for pat, nm, sv, dsc in self.VULN_SIGNATURES:
+                                    if pat in p["banner"]:
+                                        p["vulnerability"] = dsc
+                                        p["severity"] = sv
+                                        break
+                        rules_data["scan_results"].append({
+                            "ip": target,
+                            "alive": True,
+                            "open_ports": open_ports,
+                        })
 
         # Step 2: Run security rules
         print("  Running security rules...")
-        lua_findings = None
-        if self.has_lua and os.path.isfile(self.lua_rules_path):
-            print("    Using Lua rules engine")
-            lua_findings = self.run_lua_rules(rules_data)
-
-        if lua_findings:
-            for f in lua_findings:
-                self._add_finding(
-                    f.get("severity", "info"),
-                    f.get("title", "Unknown"),
-                    f.get("description", ""),
-                    f.get("affected", ""),
-                    f.get("recommendation", ""),
-                )
-        else:
-            print("    Using Python rules (Lua unavailable)")
-            py_findings = self.run_python_rules(rules_data)
-            for f in py_findings:
-                self._add_finding(
-                    f.get("severity", "info"),
-                    f.get("title", "Unknown"),
-                    f.get("description", ""),
-                    f.get("affected", ""),
-                    f.get("recommendation", ""),
-                )
+        py_findings = self.run_python_rules(rules_data)
+        for f in py_findings:
+            self._add_finding(
+                f.get("severity", "info"),
+                f.get("title", "Unknown"),
+                f.get("description", ""),
+                f.get("affected", ""),
+                f.get("recommendation", ""),
+            )
 
         # Sort all findings
         with self._lock:
