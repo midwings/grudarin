@@ -26,13 +26,13 @@ def _fmt_bytes(n):
 class DashboardWindow:
     """Live network monitoring dashboard."""
 
-    BG = "#0b1020"
-    PANEL = "#141b32"
-    CARD = "#1b2444"
-    TEXT = "#e8ecff"
-    DIM = "#9ea7cb"
-    ACCENT = "#2dd4bf"
-    WARN = "#f59e0b"
+    BG = "#050505"
+    PANEL = "#0a0a0a"
+    CARD = "#111111"
+    TEXT = "#00ff00"
+    DIM = "#008800"
+    ACCENT = "#ff0000"
+    WARN = "#ffff00"
 
     def __init__(self, network_model, stop_event, interface_name="", target_ssid=""):
         self.model = network_model
@@ -54,7 +54,7 @@ class DashboardWindow:
 
     def _build(self):
         self.root = tk.Tk()
-        self.root.title(f"Grudarin v{__version__} - Live Dashboard")
+        self.root.title(f"Grudarin v{__version__} - Network Monitor (Spy)")
         self.root.geometry("1380x860")
         self.root.configure(bg=self.BG)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -66,7 +66,7 @@ class DashboardWindow:
         title = tk.Label(
             header,
             text=(
-                f"GRUDARIN LIVE ACTIVITY MONITOR  |  IFACE: {self.interface_name}"
+                f"● LIVE NETWORK MONITOR (SPY)  |  IFACE: {self.interface_name}"
                 f"  |  SSID: {self.target_ssid}"
             ),
             bg=self.PANEL,
@@ -123,7 +123,7 @@ class DashboardWindow:
             fg=self.TEXT,
             font=("Courier", 11, "bold"),
         ).pack(anchor="w", padx=10, pady=(10, 4))
-        self.device_list = tk.Listbox(left, bg="#0f1630", fg=self.TEXT, relief="flat", font=("Courier", 10))
+        self.device_list = tk.Listbox(left, bg="#000000", fg=self.TEXT, relief="flat", font=("Courier", 10))
         self.device_list.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
         tk.Label(
@@ -135,7 +135,7 @@ class DashboardWindow:
         ).pack(anchor="w", padx=10, pady=(0, 4))
         self.packet_list = tk.Listbox(
             left,
-            bg="#0f1630",
+            bg="#000000",
             fg=self.DIM,
             relief="flat",
             font=("Courier", 9),
@@ -144,11 +144,11 @@ class DashboardWindow:
         self.packet_list.pack(fill="x", padx=10, pady=(0, 10))
 
         tk.Label(right, text="Protocol Distribution", bg=self.PANEL, fg=self.TEXT, font=("Courier", 11, "bold")).pack(anchor="w", padx=10, pady=(10, 4))
-        self.proto_list = tk.Listbox(right, bg="#0f1630", fg=self.TEXT, relief="flat", font=("Courier", 10), height=14)
+        self.proto_list = tk.Listbox(right, bg="#000000", fg=self.TEXT, relief="flat", font=("Courier", 10), height=14)
         self.proto_list.pack(fill="x", padx=10, pady=(0, 10))
 
         tk.Label(right, text="Recent Activity", bg=self.PANEL, fg=self.TEXT, font=("Courier", 11, "bold")).pack(anchor="w", padx=10, pady=(0, 4))
-        self.activity_text = tk.Text(right, bg="#0f1630", fg=self.DIM, relief="flat", font=("Courier", 9), wrap="word")
+        self.activity_text = tk.Text(right, bg="#000000", fg=self.DIM, relief="flat", font=("Courier", 9), wrap="word")
         self.activity_text.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         self.activity_text.configure(state="disabled")
 
