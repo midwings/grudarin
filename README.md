@@ -1,10 +1,6 @@
 <div align=center>
 <img width="300" alt="grudarin-logo" src="public/images/grudarin-logo.png" />
 
-![Grudarin](https://img.shields.io/badge/version-1.1.8-amber?style=flat-square)
-![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
-![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-blue?style=flat-square)
-
 </div>
 
 ---
